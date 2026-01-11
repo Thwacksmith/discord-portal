@@ -1,4 +1,6 @@
 import json
+import sys
+import os
 
 import discord
 from discord import Thread
@@ -7,7 +9,17 @@ from discord.abc import GuildChannel, PrivateChannel
 DEFAULT_WEBHOOK_NAME = 'Portal'
 MAX_MESSAGE_HISTORY = 100
 
-with open('config.json') as file:
+if len(sys.argv) != 2:
+    print(f'Incorrect number of arguments ({len(sys.argv) - 1})')
+    print('Expected 1')
+    quit()
+
+CONFIG_PATH = sys.argv[1]
+if not os.path.exists(CONFIG_PATH):
+    print(f'"{CONFIG_PATH}" is not a valid path')
+    quit()
+
+with open(CONFIG_PATH) as file:
     DATA = json.load(file)
 
 async def send_message(webhook, message):
