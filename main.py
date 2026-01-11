@@ -18,6 +18,7 @@ class PortalBot(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.portals = []
+        self.channel_id_set = set()
 
     async def on_ready(self) -> None:
         with open('config.json') as file:
@@ -50,6 +51,8 @@ class PortalBot(discord.Client):
 
             self.portals.append((channel, webhook))
 
+        self.channel_id_set = set([x[0].id for x in self.portals])
+
         print(f'Portal count: {len(self.portals)}')
         for portal in self.portals:
             print(f'{portal[0].guild.name}: #{portal[0].name}')
@@ -57,6 +60,9 @@ class PortalBot(discord.Client):
 
     async def on_message(self, message) -> None:
         if message.author.bot:
+            return
+
+        if message.channel.id not in self.channel_id_set:
             return
 
         try:
