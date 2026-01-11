@@ -7,6 +7,9 @@ from discord.abc import GuildChannel, PrivateChannel
 DEFAULT_WEBHOOK_NAME = 'Portal'
 MAX_MESSAGE_HISTORY = 100
 
+with open('config.json') as file:
+    DATA = json.load(file)
+
 async def send_message(webhook, message):
     return await webhook.send(
         content = message.content,
@@ -16,15 +19,6 @@ async def send_message(webhook, message):
         files = [await x.to_file() for x in message.attachments]
     )
 
-async def edit_message(before, after):
-    return await before.edit(
-        content = after.content,
-        attachments = after.attachments
-    )
-
-async def delete_message(message):
-    return await message.delete()
-
 class PortalBot(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -32,10 +26,7 @@ class PortalBot(discord.Client):
         self.message_history = []
 
     async def on_ready(self) -> None:
-        with open('config.json') as file:
-            data = json.load(file)
-
-        for channel_id in data['channel_ids']:
+        for channel_id in DATA['channel_ids']:
             channel = self.get_channel(channel_id)
 
             if not isinstance(channel, GuildChannel):
@@ -56,7 +47,7 @@ class PortalBot(discord.Client):
                 index = [x.name for x in webhooks].index(DEFAULT_WEBHOOK_NAME)
                 webhook = webhooks[index]
             except ValueError:
-                print(f'No webhook with default name found in channel with with ID {channel_id}')
+                print(f'No webhook with default name found in channel with ID {channel_id}')
                 print('Creating webhook for this channel')
                 webhook = await channel.create_webhook(name = DEFAULT_WEBHOOK_NAME)
 
@@ -65,11 +56,11 @@ class PortalBot(discord.Client):
 
         print('Ready')
 
-    async def on_message(self, message) -> None:
-        if message.author.bot:
-            return
+    def is_valid_message(self, message):
+        return not message.author.bot and message.channel.id in self.portals.keys()
 
-        if message.channel.id not in self.portals.keys():
+    async def on_message(self, message) -> None:
+        if not self.is_valid_message(message):
             return
 
         sent_messages = []
@@ -85,42 +76,31 @@ class PortalBot(discord.Client):
             self.message_history = self.message_history[:1]
 
     async def on_message_edit(self, before, after):
-        if before.author.bot:
+        if not self.is_valid_message(before):
             return
 
-        if before.channel.id not in self.portals.keys():
-            return
-
-        try:
-            index = [x[0] for x in self.message_history].index(before.id)
-        except ValueError:
-            return
-
+        index = [x[0] for x in self.message_history].index(before.id)
         sent_messages = [x[1] for x in self.message_history][index]
+
         for message in sent_messages:
-            await edit_message(message, after)
+            await message.edit(
+                content = after.content,
+                attachments = after.attachments
+            )
 
     async def on_message_delete(self, message):
-        if message.author.bot:
+        if not self.is_valid_message(message):
             return
 
-        if message.channel.id not in self.portals.keys():
-            return
-
-        try:
-            index = [x[0] for x in self.message_history].index(message.id)
-        except ValueError:
-            return
-
+        index = [x[0] for x in self.message_history].index(message.id)
         sent_messages = [x[1] for x in self.message_history][index]
+
         for message in sent_messages:
-            await delete_message(message)
+            await message.delete()
 
         del self.message_history[index]
 
-with open('config.json') as file:
-    data = json.load(file)
-token = data['token']
+token = DATA['token']
 
 intents = discord.Intents.default()
 intents.message_content = True
