@@ -3,7 +3,7 @@ import os
 import sys
 
 import discord
-from discord import Thread
+from discord import Forbidden, HTTPException, Thread
 from discord.abc import GuildChannel, PrivateChannel
 
 DEFAULT_WEBHOOK_NAME = "Portal"
@@ -79,21 +79,32 @@ class PortalBot(discord.Client):
 
                 print(f"{channel.guild.name}: #{channel.name}")
 
-                webhooks_in_channel = await channel.webhooks()
+                try:
+                    channel_webhooks = await channel.webhooks()
+                except Forbidden:
+                    print("I do not have permission to create a webhook")
+                    continue
+
+                webhook = next(
+                    (w for w in channel_webhooks if w.name == DEFAULT_WEBHOOK_NAME),
+                    None,
+                )
+
+                if webhook is not None:
+                    buffer.append((channel_id, webhook))
+                    continue
+
+                print(f"No webhook with default name found in channel #{channel.name}")
+                print("Creating webhook for this channel")
 
                 try:
-                    index = [x.name for x in webhooks_in_channel].index(
-                        DEFAULT_WEBHOOK_NAME
-                    )
-                    webhook = webhooks_in_channel[index]
-                except ValueError:
-                    print(
-                        f"No webhook with default name found in channel #{channel.name}"
-                    )
-                    print("Creating webhook for this channel")
                     webhook = await channel.create_webhook(name=DEFAULT_WEBHOOK_NAME)
-
-                buffer.append((channel_id, webhook))
+                except Forbidden:
+                    print("I do not have permissions to create a webhook")
+                except HTTPException:
+                    print("Failed to create webhook")
+                else:
+                    buffer.append((channel_id, webhook))
 
             portal = Portal(name, buffer)
             self.portals.append(portal)
