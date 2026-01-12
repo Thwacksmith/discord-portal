@@ -7,7 +7,7 @@ from discord import Thread
 from discord.abc import GuildChannel, PrivateChannel
 
 DEFAULT_WEBHOOK_NAME = "Portal"
-MAX_MESSAGE_HISTORY = 3
+MAX_MESSAGE_HISTORY = 100
 
 if len(sys.argv) != 2:
     print(f"Incorrect number of arguments ({len(sys.argv) - 1})")
@@ -38,13 +38,14 @@ async def send_message(webhook, message):
 
 
 class Portal:
-    def __init__(self, name) -> None:
+    def __init__(self, name, buffer) -> None:
         self.name = name
         self.map = {}
         self.message_history = []
 
-    def add_channel(self, channel_id, webhook) -> None:
-        self.map[channel_id] = webhook
+        channel_ids, webhooks = zip(*buffer)
+        for i, channel_id in enumerate(channel_ids):
+            self.map[channel_id] = webhooks[:i] + webhooks[i + 1 :]
 
 
 class PortalBot(discord.Client):
@@ -56,7 +57,8 @@ class PortalBot(discord.Client):
         for portal_data in DATA["portals"]:
             name = portal_data["name"]
             print(f'Creating portal "{name}"')
-            portal = Portal(name)
+
+            buffer = []
 
             for channel_id in portal_data["channel_ids"]:
                 channel = self.get_channel(channel_id)
@@ -77,11 +79,13 @@ class PortalBot(discord.Client):
 
                 print(f"{channel.guild.name}: #{channel.name}")
 
-                webhooks = await channel.webhooks()
+                webhooks_in_channel = await channel.webhooks()
 
                 try:
-                    index = [x.name for x in webhooks].index(DEFAULT_WEBHOOK_NAME)
-                    webhook = webhooks[index]
+                    index = [x.name for x in webhooks_in_channel].index(
+                        DEFAULT_WEBHOOK_NAME
+                    )
+                    webhook = webhooks_in_channel[index]
                 except ValueError:
                     print(
                         f"No webhook with default name found in channel #{channel.name}"
@@ -89,8 +93,9 @@ class PortalBot(discord.Client):
                     print("Creating webhook for this channel")
                     webhook = await channel.create_webhook(name=DEFAULT_WEBHOOK_NAME)
 
-                portal.add_channel(channel_id, webhook)
+                buffer.append((channel_id, webhook))
 
+            portal = Portal(name, buffer)
             self.portals.append(portal)
 
         print("Ready")
@@ -112,8 +117,7 @@ class PortalBot(discord.Client):
 
         sent_messages = []
 
-        webhooks = [y for x, y in portal.map.items() if x != channel_id]
-        for webhook in webhooks:
+        for webhook in portal.map[channel_id]:
             sent_message = await send_message(webhook, message)
             if sent_message is not None:
                 sent_messages.append(sent_message)
