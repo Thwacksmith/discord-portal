@@ -23,10 +23,6 @@ with open(CONFIG_PATH) as file:
     DATA = json.load(file)
 
 
-def flatten_list_of_dicts(list_of_dicts):
-    return {key: value for dict in list_of_dicts for key, value in dict.items()}
-
-
 async def send_message(webhook, message):
     return await webhook.send(
         content=message.content,
@@ -50,7 +46,6 @@ class Portal:
 class PortalBot(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.portals = []
         self.portal_map = {}
 
     async def on_ready(self) -> None:
@@ -108,7 +103,6 @@ class PortalBot(discord.Client):
 
             channel_ids, webhooks = zip(*buffer)
             portal = Portal(name, channel_ids, webhooks)
-            self.portals.append(portal)
 
             for id in channel_ids:
                 self.portal_map[id] = portal
@@ -116,9 +110,7 @@ class PortalBot(discord.Client):
         print("Ready")
 
     def is_valid_message(self, message):
-        return not message.author.bot and message.channel.id in flatten_list_of_dicts(
-            [portal.map for portal in self.portals]
-        )
+        return not message.author.bot and message.channel.id in self.portal_map
 
     async def on_message(self, message) -> None:
         if not self.is_valid_message(message):
@@ -141,24 +133,28 @@ class PortalBot(discord.Client):
             return
 
         portal = self.portal_map[before.channel.id]
-
         index = [x[0] for x in portal.message_history].index(before.id)
         sent_messages = [x[1] for x in portal.message_history][index]
 
         for message in sent_messages:
-            await message.edit(content=after.content, attachments=after.attachments)
+            try:
+                await message.edit(content=after.content, attachments=after.attachments)
+            except HTTPException:
+                print("Failed to edit message")
 
     async def on_message_delete(self, message) -> None:
         if not self.is_valid_message(message):
             return
 
         portal = self.portal_map[message.channel.id]
-
         index = [x[0] for x in portal.message_history].index(message.id)
         sent_messages = [x[1] for x in portal.message_history][index]
 
         for message in sent_messages:
-            await message.delete()
+            try:
+                await message.delete()
+            except HTTPException:
+                print("Failed to delete message")
 
         del portal.message_history[index]
 
