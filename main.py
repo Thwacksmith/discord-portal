@@ -37,7 +37,7 @@ class Portal:
     def __init__(self, name, channel_ids, webhooks) -> None:
         self.name = name
         self.map = {}
-        self.message_history = []
+        self.message_history = {}
 
         for i, channel_id in enumerate(channel_ids):
             self.map[channel_id] = webhooks[:i] + webhooks[i + 1 :]
@@ -124,17 +124,16 @@ class PortalBot(discord.Client):
             if sent_message is not None:
                 sent_messages.append(sent_message)
 
-        portal.message_history.append((message.id, sent_messages))
+        portal.message_history[message.id] = sent_messages
         if len(portal.message_history) > MAX_MESSAGE_HISTORY:
-            portal.message_history = portal.message_history[:1]
+            portal.message_history.pop(next(iter(portal.message_history)))
 
     async def on_message_edit(self, before, after) -> None:
         if not self.is_valid_message(before):
             return
 
         portal = self.portal_map[before.channel.id]
-        index = [x[0] for x in portal.message_history].index(before.id)
-        sent_messages = [x[1] for x in portal.message_history][index]
+        sent_messages = portal.message_history[before.id]
 
         for message in sent_messages:
             try:
@@ -147,16 +146,13 @@ class PortalBot(discord.Client):
             return
 
         portal = self.portal_map[message.channel.id]
-        index = [x[0] for x in portal.message_history].index(message.id)
-        sent_messages = [x[1] for x in portal.message_history][index]
+        sent_messages = portal.message_history[message.id]
 
         for message in sent_messages:
             try:
                 await message.delete()
             except HTTPException:
                 print("Failed to delete message")
-
-        del portal.message_history[index]
 
 
 token = DATA["token"]
