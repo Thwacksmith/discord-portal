@@ -38,12 +38,11 @@ async def send_message(webhook, message):
 
 
 class Portal:
-    def __init__(self, name, buffer) -> None:
+    def __init__(self, name, channel_ids, webhooks) -> None:
         self.name = name
         self.map = {}
         self.message_history = []
 
-        channel_ids, webhooks = zip(*buffer)
         for i, channel_id in enumerate(channel_ids):
             self.map[channel_id] = webhooks[:i] + webhooks[i + 1 :]
 
@@ -52,6 +51,7 @@ class PortalBot(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.portals = []
+        self.portal_map = {}
 
     async def on_ready(self) -> None:
         for portal_data in DATA["portals"]:
@@ -106,8 +106,12 @@ class PortalBot(discord.Client):
                 else:
                     buffer.append((channel_id, webhook))
 
-            portal = Portal(name, buffer)
+            channel_ids, webhooks = zip(*buffer)
+            portal = Portal(name, channel_ids, webhooks)
             self.portals.append(portal)
+
+            for id in channel_ids:
+                self.portal_map[id] = portal
 
         print("Ready")
 
@@ -120,15 +124,10 @@ class PortalBot(discord.Client):
         if not self.is_valid_message(message):
             return
 
-        channel_id = message.channel.id
-        for p in self.portals:
-            if channel_id in p.map:
-                portal = p
-                break
-
+        portal = self.portal_map[message.channel.id]
         sent_messages = []
 
-        for webhook in portal.map[channel_id]:
+        for webhook in portal.map[message.channel.id]:
             sent_message = await send_message(webhook, message)
             if sent_message is not None:
                 sent_messages.append(sent_message)
@@ -141,11 +140,7 @@ class PortalBot(discord.Client):
         if not self.is_valid_message(before):
             return
 
-        channel_id = before.channel.id
-        for p in self.portals:
-            if channel_id in p.map:
-                portal = p
-                break
+        portal = self.portal_map[before.channel.id]
 
         index = [x[0] for x in portal.message_history].index(before.id)
         sent_messages = [x[1] for x in portal.message_history][index]
@@ -157,11 +152,7 @@ class PortalBot(discord.Client):
         if not self.is_valid_message(message):
             return
 
-        channel_id = message.channel.id
-        for p in self.portals:
-            if channel_id in p.map:
-                portal = p
-                break
+        portal = self.portal_map[message.channel.id]
 
         index = [x[0] for x in portal.message_history].index(message.id)
         sent_messages = [x[1] for x in portal.message_history][index]
