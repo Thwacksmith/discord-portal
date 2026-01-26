@@ -23,7 +23,10 @@ with open(CONFIG_PATH) as file:
     DATA = json.load(file)
 
 
-async def send_message(webhook, message, content):
+async def send_message(webhook, message, content=None):
+    if content is None:
+        content = message.content
+
     return await webhook.send(
         content=content,
         wait=True,
@@ -37,10 +40,19 @@ class Portal:
     def __init__(self, name, channel_ids, webhooks) -> None:
         self.name = name
         self.map = {}
-        self.message_history = {}
+        self.src_msg_to_dst_msg = {}
+        self.message_history = []
 
         for i, channel_id in enumerate(channel_ids):
             self.map[channel_id] = webhooks[:i] + webhooks[i + 1 :]
+
+    def push_history(self, src_message, dst_messages) -> None:
+        self.src_msg_to_dst_msg[src_message.id] = dst_messages
+        self.message_history.append([src_message] + dst_messages)
+
+        if len(self.src_msg_to_dst_msg) > MAX_MESSAGE_HISTORY:
+            self.src_msg_to_dst_msg.pop(next(iter(self.src_msg_to_dst_msg)))
+            del self.message_history[0]
 
 
 class PortalBot(discord.Client):
@@ -122,13 +134,21 @@ class PortalBot(discord.Client):
         portal = self.portal_map[message.channel.id]
         sent_messages = []
 
-        if message.reference is not None:
-            referenced_messages = portal.message_history[message.reference.message_id]
-            for reference in referenced_messages:
-                webhook = self.channel_to_webhook[reference.channel.id]
-                header = (
-                    f"-# Replying to [{reference.author.name}]({reference.jump_url})\n"
-                )
+        if (reference := message.reference) is not None:
+            reply_set = next(
+                (
+                    x
+                    for x in portal.message_history
+                    if reference.message_id in [y.id for y in x]
+                ),
+                [],
+            )
+
+            replies = [x for x in reply_set if x.id != reference.message_id]
+
+            for reply in replies:
+                webhook = self.channel_to_webhook[reply.channel.id]
+                header = f"-# Replying to [{reply.author.name}]({reply.jump_url})\n"
                 sent_message = await send_message(
                     webhook, message, header + message.content
                 )
@@ -137,21 +157,20 @@ class PortalBot(discord.Client):
         else:
             webhooks = portal.map[message.channel.id]
             for webhook in webhooks:
-                content = message.content
-                sent_message = await send_message(webhook, message, content)
+                sent_message = await send_message(webhook, message)
                 if sent_message is not None:
                     sent_messages.append(sent_message)
 
-        portal.message_history[message.id] = sent_messages
-        if len(portal.message_history) > MAX_MESSAGE_HISTORY:
-            portal.message_history.pop(next(iter(portal.message_history)))
+        portal.push_history(message, sent_messages)
 
     async def on_message_edit(self, before, after) -> None:
         if not self.is_valid_message(before):
             return
 
         portal = self.portal_map[before.channel.id]
-        sent_messages = portal.message_history[before.id]
+        if before.id not in portal.src_msg_to_dst_msg:
+            return
+        sent_messages = portal.src_msg_to_dst_msg[before.id]
 
         for message in sent_messages:
             try:
@@ -164,7 +183,9 @@ class PortalBot(discord.Client):
             return
 
         portal = self.portal_map[message.channel.id]
-        sent_messages = portal.message_history[message.id]
+        if message.id not in portal.src_msg_to_dst_msg:
+            return
+        sent_messages = portal.src_msg_to_dst_msg[message.id]
 
         for sent_message in sent_messages:
             try:
@@ -172,7 +193,10 @@ class PortalBot(discord.Client):
             except HTTPException:
                 print("Failed to delete message")
 
-        del portal.message_history[message.id]
+        del portal.src_msg_to_dst_msg[message.id]
+        portal.message_history = [
+            x for x in portal.message_history if message.id not in [y.id for y in x]
+        ]
 
 
 token = DATA["token"]
