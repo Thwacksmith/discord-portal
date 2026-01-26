@@ -23,9 +23,9 @@ with open(CONFIG_PATH) as file:
     DATA = json.load(file)
 
 
-async def send_message(webhook, message):
+async def send_message(webhook, message, content):
     return await webhook.send(
-        content=message.content,
+        content=content,
         wait=True,
         username=message.author.name,
         avatar_url=message.author.avatar.url,
@@ -46,6 +46,7 @@ class Portal:
 class PortalBot(discord.Client):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.channel_to_webhook = {}
         self.portal_map = {}
 
     async def on_ready(self) -> None:
@@ -86,6 +87,7 @@ class PortalBot(discord.Client):
                 )
 
                 if webhook is not None:
+                    self.channel_to_webhook[channel_id] = webhook
                     buffer.append((channel_id, webhook))
                     continue
 
@@ -99,6 +101,7 @@ class PortalBot(discord.Client):
                 except HTTPException:
                     print("Failed to create webhook")
                 else:
+                    self.channel_to_webhook[channel_id] = webhook
                     buffer.append((channel_id, webhook))
 
             channel_ids, webhooks = zip(*buffer)
@@ -119,10 +122,25 @@ class PortalBot(discord.Client):
         portal = self.portal_map[message.channel.id]
         sent_messages = []
 
-        for webhook in portal.map[message.channel.id]:
-            sent_message = await send_message(webhook, message)
-            if sent_message is not None:
-                sent_messages.append(sent_message)
+        if message.reference is not None:
+            referenced_messages = portal.message_history[message.reference.message_id]
+            for reference in referenced_messages:
+                webhook = self.channel_to_webhook[reference.channel.id]
+                header = (
+                    f"-# Replying to [{reference.author.name}]({reference.jump_url})\n"
+                )
+                sent_message = await send_message(
+                    webhook, message, header + message.content
+                )
+                if sent_message is not None:
+                    sent_messages.append(sent_message)
+        else:
+            webhooks = portal.map[message.channel.id]
+            for webhook in webhooks:
+                content = message.content
+                sent_message = await send_message(webhook, message, content)
+                if sent_message is not None:
+                    sent_messages.append(sent_message)
 
         portal.message_history[message.id] = sent_messages
         if len(portal.message_history) > MAX_MESSAGE_HISTORY:
@@ -148,11 +166,13 @@ class PortalBot(discord.Client):
         portal = self.portal_map[message.channel.id]
         sent_messages = portal.message_history[message.id]
 
-        for message in sent_messages:
+        for sent_message in sent_messages:
             try:
-                await message.delete()
+                await sent_message.delete()
             except HTTPException:
                 print("Failed to delete message")
+
+        del portal.message_history[message.id]
 
 
 token = DATA["token"]
